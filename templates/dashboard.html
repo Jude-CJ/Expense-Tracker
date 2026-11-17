@@ -1,0 +1,242 @@
+{% extends "base.html" %}
+{% block title %}Overview{% endblock %}
+{% block head %}<script src="https://cdn.plot.ly/plotly-2.35.2.min.js" defer></script>{% endblock %}
+{% block content %}
+<header class="page-header dashboard-header">
+  <div><div class="eyebrow">{{ today|localdate("full") if today else "YOUR FINANCES" }}</div><h1>Your money, <span class="heading-accent">in perspective.</span></h1><p class="muted">A little clarity goes a long way. Here's your spending at a glance.</p></div>
+  <div class="entry-actions"><a class="button primary" href="{{ url_for('quick_add_expense') }}"><span class="plus">+</span> Quick add</a><a class="button ghost" href="{{ url_for('new_expense') }}">Add details</a></div>
+</header>
+<section class="filter-bar panel">
+  <form method="get" action="{{ url_for('dashboard') }}" class="filter-form">
+    <div class="filter-label"><span class="filter-icon">◷</span><strong>Spending period</strong></div>
+    <label class="sr-only" for="start">From</label><input id="start" type="date" name="start" value="{{ start_date }}">
+    <span class="date-divider">to</span>
+    <label class="sr-only" for="end">To</label><input id="end" type="date" name="end" value="{{ end_date }}">
+    <label class="sr-only" for="category-filter">Category</label><select id="category-filter" name="category"><option value="">All categories</option>{% for category in categories %}<option value="{{ category }}" {% if selected_category == category %}selected{% endif %}>{{ category }}</option>{% endfor %}</select>
+    <label class="sr-only" for="payment-filter">Payment method</label><select id="payment-filter" name="payment_method"><option value="">All payment methods</option>{% for method in ["Card", "Cash", "Bank transfer", "Other"] %}<option value="{{ method }}" {% if selected_payment == method %}selected{% endif %}>{{ method }}</option>{% endfor %}</select>
+    <button class="button compact" type="submit">Apply</button>
+    <a class="button compact ghost" href="{{ url_for('export_csv', start=start_date, end=end_date, category=selected_category, payment_method=selected_payment) }}">↓ <span class="hide-small">Export CSV</span></a>
+  </form>
+</section>
+<section class="metric-grid">
+  <article class="metric-card"><div class="metric-top"><span>Total spent</span><span class="metric-icon coral">↘</span></div><strong class="metric-value">{{ total|money }}</strong><div class="metric-foot">Compared with {{ previous_start|localdate("short") }} – {{ previous_end|localdate("short") }}</div><div class="comparison-row">{% if comparison_percent is not none %}<span class="period-change {{ comparison_direction }}">{% if comparison_direction == "increase" %}↑{% elif comparison_direction == "decrease" %}↓{% else %}→{% endif %} {{ comparison_percent|localnumber(1) }}%</span><span class="comparison-amount">{% if comparison_direction == "increase" %}+{% elif comparison_direction == "decrease" %}−{% endif %}{{ (total - previous_total)|abs|money }}</span>{% else %}<span class="period-change {{ comparison_direction }}">{{ comparison_label }}</span>{% endif %}<span class="comparison-previous">previous {{ previous_total|money }}</span></div></article>
+  <article class="metric-card"><div class="metric-top"><span>Transactions</span><span class="metric-icon blue">≋</span></div><strong class="metric-value">{{ transaction_count|localnumber(0) }}</strong><div class="metric-foot">{{ previous_count|localnumber(0) }} in the previous period</div></article>
+  <article class="metric-card"><div class="metric-top"><span>Average expense</span><span class="metric-icon yellow">↗</span></div><strong class="metric-value">{{ average|money }}</strong><div class="metric-foot">Per transaction in this period</div></article>
+  <article class="metric-card"><div class="metric-top"><span>Spent this month</span><span class="metric-icon green">◷</span></div><strong class="metric-value">{{ current_month_total|money }}</strong><div class="metric-foot">Month to date</div></article>
+</section>
+<section class="chart-grid">
+  <article class="panel chart-panel">
+    <div class="panel-heading"><div><h2>Spending over time</h2><p class="muted">Daily activity in your selected period</p></div><span class="chart-mark">↗</span></div>
+    <p id="trend-chart-status" class="chart-status" role="status" aria-live="polite" aria-atomic="true">Loading interactive chart…</p>
+    <div id="trend-chart" class="chart" role="img" aria-label="Daily spending chart. A text summary is available below."></div>
+  </article>
+  <article class="panel chart-panel">
+    <div class="panel-heading"><div><h2>Where it goes</h2><p class="muted">Breakdown by category</p></div><span class="chart-mark">◉</span></div>
+    <p id="category-chart-status" class="chart-status" role="status" aria-live="polite" aria-atomic="true">Loading interactive chart…</p>
+    <div id="category-chart" class="chart category-chart" role="img" aria-label="Spending by category chart. A text summary is available below."></div>
+  </article>
+  <article class="panel chart-panel category-trend-panel">
+    <div class="panel-heading"><div><h2>Category trends</h2><p class="muted">{{ analytics.trendLabel }} spending by category</p></div><span class="chart-mark">⌁</span></div>
+    <p id="category-trend-chart-status" class="chart-status" role="status" aria-live="polite" aria-atomic="true">Loading interactive chart…</p>
+    <div id="category-trend-chart" class="chart category-trend-chart" role="img" aria-label="Category spending trends over time. A text summary is available below."></div>
+  </article>
+</section>
+<details class="panel chart-data-summary">
+  <summary>Read a text summary of the chart data</summary>
+  <div class="chart-summary-content">
+    <p>For {{ chart_start_date|localdate("medium") }} to {{ chart_end_date|localdate("medium") }}, total spending was {{ total|money }} across {{ analytics.dailySummary.dayCount|localnumber(0) }} {{ "day" if analytics.dailySummary.dayCount == 1 else "days" }} with expenses.</p>
+    {% if daily_peak_date %}<p>The highest daily total was {{ analytics.dailySummary.peakAmount|money }} on {{ daily_peak_date|localdate("medium") }}.</p>{% endif %}
+    {% if analytics.categories %}
+    <div class="chart-summary-grid">
+      <section>
+        <h3>Spending by category</h3>
+        <ul>{% for category in analytics.categories %}<li><span>{{ category }}</span><strong>{{ analytics.categoryAmounts[loop.index0]|money }}</strong></li>{% endfor %}</ul>
+      </section>
+      <section>
+        <h3>{{ analytics.trendLabel }} category trend</h3>
+        {% if analytics.categoryTrendSummary %}
+        <p>First period: {{ category_trend_start_date|localdate("medium") }}. Latest period: {{ category_trend_end_date|localdate("medium") }}.</p>
+        <ul>{% for trend in analytics.categoryTrendSummary %}<li><span>{{ trend.name }}</span><strong>{{ trend.firstAmount|money }} to {{ trend.lastAmount|money }}</strong></li>{% endfor %}</ul>
+        {% else %}<p>No category trend data is available for this period.</p>{% endif %}
+      </section>
+    </div>
+    {% else %}<p>No spending data is available for the selected period and filters.</p>{% endif %}
+  </div>
+</details>
+<noscript><p class="chart-noscript" role="status">Interactive charts require JavaScript. The text summary above is still available.</p></noscript>
+<section class="insight-grid">
+  <article class="panel insight-panel">
+    <div class="panel-heading"><div><h2>Largest expenses</h2><p class="muted">Biggest individual transactions in this period</p></div><span class="chart-mark">↗</span></div>
+    {% if largest_expenses %}
+    <ol class="insight-list">{% for expense in largest_expenses %}
+      <li><span class="insight-rank">{{ loop.index }}</span><div class="insight-description"><strong>{{ expense.merchant or expense.description or expense.category }}</strong><small>{{ expense.category }} · {{ expense.date|localdate("medium") }}</small></div><strong class="insight-amount">{{ expense.amount|money }}</strong></li>
+    {% endfor %}</ol>
+    {% else %}<div class="insight-empty">No expenses in this period yet.</div>{% endif %}
+  </article>
+  <article class="panel insight-panel">
+    <div class="panel-heading"><div><h2>Most frequent</h2><p class="muted">Repeated descriptions in this period</p></div><span class="chart-mark">≋</span></div>
+    {% if frequent_expenses %}
+    <ol class="insight-list">{% for expense in frequent_expenses %}
+      <li><span class="insight-rank">{{ loop.index }}</span><div class="insight-description"><strong>{{ expense.name }}</strong><small>{{ expense.category }} · {{ expense.count|localnumber(0) }} transactions</small></div><strong class="insight-amount">{{ expense.total|money }}</strong></li>
+    {% endfor %}</ol>
+    {% else %}<div class="insight-empty">No repeated expenses found in this period.</div>{% endif %}
+  </article>
+</section>
+<section class="lower-grid">
+  <article class="panel transactions-panel" id="transactions">
+    <div class="panel-heading"><div><h2>Expense history</h2><p class="muted">{{ total_count|localnumber(0) }} matching {{ "expense" if total_count == 1 else "expenses" }} in this period</p></div><a class="text-link" href="{{ url_for('new_expense') }}">+ Add new</a></div>
+    <form method="get" action="{{ url_for('dashboard') }}" class="transaction-controls">
+      <input type="hidden" name="start" value="{{ start_date }}">
+      <input type="hidden" name="end" value="{{ end_date }}">
+      <input type="hidden" name="category" value="{{ selected_category }}">
+      <input type="hidden" name="payment_method" value="{{ selected_payment }}">
+      <label class="sr-only" for="transaction-search">Search descriptions, merchants, or tags</label>
+      <input id="transaction-search" class="search-input" type="search" name="q" maxlength="100" placeholder="Search descriptions, merchants, or tags…" value="{{ search_query }}">
+      <label class="sr-only" for="transaction-sort">Sort transactions by</label>
+      <select id="transaction-sort" name="sort">
+        {% for value, label in [("date", "Date"), ("description", "Description"), ("merchant", "Merchant"), ("category", "Category"), ("amount", "Amount")] %}
+        <option value="{{ value }}" {% if sort_by == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <label class="sr-only" for="transaction-direction">Sort direction</label>
+      <select id="transaction-direction" name="direction"><option value="desc" {% if sort_direction == "desc" %}selected{% endif %}>Descending</option><option value="asc" {% if sort_direction == "asc" %}selected{% endif %}>Ascending</option></select>
+      <label class="sr-only" for="transaction-page-size">Rows per page</label>
+      <select id="transaction-page-size" name="per_page">{% for size in [10, 25, 50] %}<option value="{{ size }}" {% if per_page == size %}selected{% endif %}>{{ size }} / page</option>{% endfor %}</select>
+      <button class="button compact" type="submit">Search</button>
+      {% if search_query %}<a class="clear-search" href="{{ url_for('dashboard', start=start_date, end=end_date, category=selected_category, payment_method=selected_payment, sort=sort_by, direction=sort_direction, per_page=per_page) }}">Clear</a>{% endif %}
+    </form>
+    {% if expenses %}
+    <div class="table-wrap"><table><thead><tr><th>TRANSACTION</th><th>CATEGORY</th><th>DATE</th><th>AMOUNT</th><th><span class="sr-only">ACTIONS</span></th></tr></thead><tbody>
+      {% for expense in expenses %}
+      <tr>
+        <td>
+          <div class="transaction-name">
+            <span class="category-dot dot-{{ loop.index0 % 6 }}"></span>
+            <div>
+              <strong>{{ expense.merchant or expense.description or expense.category }}</strong>
+              <small>{% if expense.merchant and expense.description %}{{ expense.description }} · {% endif %}{{ expense.payment_method }}</small>
+              {% if expense.tags %}<small class="transaction-meta">Tags: {{ expense.tags }}</small>{% endif %}
+              {% if expense.notes %}<small class="transaction-meta" title="{{ expense.notes }}">Note: {{ expense.notes }}</small>{% endif %}
+            </div>
+          </div>
+        </td>
+        <td><span class="category-pill">{{ expense.category }}</span></td>
+        <td>{{ expense.date|localdate("medium") }}</td>
+        <td class="amount-cell">− {{ expense.amount|money }}</td>
+        <td class="row-actions">
+          <a class="row-action edit-action" href="{{ url_for('edit_expense', expense_id=expense.id, start=start_date, end=end_date, category=selected_category, payment_method=selected_payment, q=search_query, sort=sort_by, direction=sort_direction, per_page=per_page, page=page) }}">Edit</a>
+          <a class="row-action duplicate-action" href="{{ url_for('duplicate_expense', expense_id=expense.id, start=start_date, end=end_date, category=selected_category, payment_method=selected_payment, q=search_query, sort=sort_by, direction=sort_direction, per_page=per_page, page=page) }}">Duplicate</a>
+          <form method="post" action="{{ url_for('delete_expense', expense_id=expense.id, start=start_date, end=end_date, category=selected_category, payment_method=selected_payment, q=search_query, sort=sort_by, direction=sort_direction, per_page=per_page, page=page) }}" data-confirm="Delete this expense?">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="row-action delete-action">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody></table></div>
+    {% if page_count > 1 %}
+    <nav class="pagination" aria-label="Expense history pages">
+      <span class="pagination-summary">Page {{ page }} of {{ page_count }}</span>
+      <div class="pagination-actions">
+        {% if page > 1 %}<a class="page-button" href="{{ url_for('dashboard', start=start_date, end=end_date, category=selected_category, payment_method=selected_payment, q=search_query, sort=sort_by, direction=sort_direction, per_page=per_page, page=page - 1) }}">← Previous</a>{% else %}<span class="page-button disabled">← Previous</span>{% endif %}
+        {% if page < page_count %}<a class="page-button" href="{{ url_for('dashboard', start=start_date, end=end_date, category=selected_category, payment_method=selected_payment, q=search_query, sort=sort_by, direction=sort_direction, per_page=per_page, page=page + 1) }}">Next →</a>{% else %}<span class="page-button disabled">Next →</span>{% endif %}
+      </div>
+    </nav>
+    {% endif %}
+    {% else %}
+    <div class="empty-state"><div class="empty-icon">↗</div><strong>{{ "No expenses match this search" if search_query else "No expenses in this period yet" }}</strong><p>{{ "Try another description or clear your search." if search_query else "Add your first expense or choose a different date range." }}</p>{% if search_query %}<a class="button compact" href="{{ url_for('dashboard', start=start_date, end=end_date, category=selected_category, payment_method=selected_payment) }}">Clear search</a>{% else %}<a class="button primary compact" href="{{ url_for('new_expense') }}">Add your first expense →</a>{% endif %}</div>
+    {% endif %}
+  </article>
+  <div class="side-panels">
+    <article class="panel budgets-panel" id="budgets">
+      <div class="panel-heading"><div><h2>Monthly budgets</h2><p class="muted">Progress for {{ today|localdate("MMMM") if today else "this month" }} · alert at 80%</p></div><span class="chart-mark">◎</span></div>
+      {% if budget_progress %}
+      <div class="budget-list">{% for budget in budget_progress %}
+        <div class="budget-item">
+          <div class="budget-label"><strong>{{ budget.category }}</strong><span>{{ budget.spent|money }} spent · {{ budget.limit|money }} limit</span></div>
+          <div class="progress-track" role="progressbar" aria-label="{{ budget.category }} budget used" aria-valuenow="{{ budget.percent|round|int }}" aria-valuemin="0" aria-valuemax="100"><div class="progress-bar {% if budget.over %}over{% elif budget.approaching %}approaching{% endif %}" style="width: {{ budget.percent }}%"></div></div>
+          <div class="budget-statusline">
+            {% if budget.over %}
+            <strong class="budget-status over">{{ budget.overage|money }} over</strong><span class="budget-alert over" role="alert">Monthly limit exceeded</span>
+            {% elif budget.approaching %}
+            <strong class="budget-status approaching">{{ budget.remaining|money }} left</strong><span class="budget-alert approaching" role="status">Approaching limit</span>
+            {% else %}
+            <strong class="budget-status">{{ budget.remaining|money }} left</strong>
+            {% endif %}
+          </div>
+          <div class="budget-edit-row">
+            <form method="post" action="{{ url_for('edit_budget', category=budget.category) }}" class="budget-edit-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <label class="sr-only" for="budget-limit-{{ loop.index }}">Update {{ budget.category }} monthly limit</label>
+              <span class="currency-prefix">{{ current_user.currency }}</span><input id="budget-limit-{{ loop.index }}" name="amount" type="number" min="0.01" max="9999999999.99" step="0.01" value="{{ '%.2f'|format(budget.limit) }}" required>
+              <button class="button compact" type="submit">Update</button>
+            </form>
+            <form method="post" action="{{ url_for('delete_budget', category=budget.category) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="text-button remove-budget" title="Remove {{ budget.category }} budget">Remove</button></form>
+          </div>
+        </div>
+      {% endfor %}</div>
+      {% else %}<div class="budget-empty">Set a monthly limit to keep an eye on a category.</div>{% endif %}
+      <form method="post" action="{{ url_for('save_budget') }}" class="budget-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label class="sr-only" for="budget-category">Category</label><select name="category" id="budget-category" required>{% for category in categories %}<option value="{{ category }}" {% if category in budgets %}disabled{% endif %}>{{ category }}{% if category in budgets %} (set){% endif %}</option>{% endfor %}</select>
+        <label class="sr-only" for="budget-amount">Monthly limit in {{ current_user.currency }}</label><input id="budget-amount" name="amount" type="number" min="0.01" step="0.01" placeholder="Limit in {{ current_user.currency }}" required>
+        <button class="button compact" type="submit">Set</button>
+      </form>
+    </article>
+    <article class="panel import-panel">
+      <div class="panel-heading"><div><h2>Bring your data</h2><p class="muted">Import expenses from a CSV file</p></div><span class="chart-mark">↓</span></div>
+      <form method="post" action="{{ url_for('import_csv') }}" enctype="multipart/form-data" class="import-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label class="file-picker"><span class="upload-icon">↑</span><span><strong>Choose a CSV file</strong><small>date, amount, category required · 2 MB max</small></span><input type="file" name="file" accept=".csv,text/csv" required></label>
+        <button class="button compact full-button" type="submit">Import expenses</button>
+      </form>
+      <a class="sample-link" href="{{ url_for('static', filename='sample-expenses.csv') }}">Download a sample CSV format →</a>
+    </article>
+    <article class="panel recurring-panel" id="recurring">
+      <div class="panel-heading"><div><h2>Upcoming charges</h2><p class="muted">Review a charge, then mark it paid to add it to your expenses</p></div><span class="chart-mark">↻</span></div>
+      {% if recurring_expenses %}
+      <div class="recurring-list">
+        {% for recurring in recurring_expenses %}
+        <div class="recurring-item">
+          <div class="recurring-summary">
+            <div><strong>{{ recurring.description }}</strong><span>{{ recurring.category }} · {{ recurring.amount|money }} / {{ recurring.frequency }}</span></div>
+            <span class="recurring-due {% if recurring.next_due < today %}overdue{% elif recurring.next_due == today %}due-today{% endif %}">
+              {% if recurring.next_due < today %}Overdue · {% elif recurring.next_due == today %}Due today · {% endif %}{{ recurring.next_due|localdate("medium") }}
+            </span>
+          </div>
+          <div class="recurring-actions">
+            <form method="post" action="{{ url_for('mark_recurring_paid', recurring_id=recurring.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="due_date" value="{{ recurring.next_due.isoformat() }}">
+              <button class="button compact" type="submit">Mark paid</button>
+            </form>
+            <form method="post" action="{{ url_for('stop_recurring', recurring_id=recurring.id) }}" data-confirm="Stop this recurring expense? Past expenses will stay in your history.">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="text-button" type="submit">Stop</button>
+            </form>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="budget-empty">No scheduled charges yet. Add rent, subscriptions, or other repeating expenses below.</div>
+      {% endif %}
+      <form method="post" action="{{ url_for('create_recurring') }}" class="recurring-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <strong class="recurring-form-title">Schedule a recurring expense</strong>
+        <label>Description<input name="description" maxlength="160" placeholder="e.g. Monthly rent" required></label>
+        <div class="recurring-form-grid">
+          <label>Amount ({{ current_user.currency }})<input name="amount" type="number" min="0.01" max="9999999999.99" step="0.01" placeholder="0.00" required></label>
+          <label>Frequency<select name="frequency" required><option value="monthly">Monthly</option><option value="weekly">Weekly</option></select></label>
+          <label>Next due<input name="next_due" type="date" value="{{ today.isoformat() }}" required></label>
+          <label>Category<select name="category" required>{% for category in categories %}<option value="{{ category }}">{{ category }}</option>{% endfor %}</select></label>
+          <label>Payment method<select name="payment_method" required>{% for method in ["Card", "Cash", "Bank transfer", "Other"] %}<option value="{{ method }}">{{ method }}</option>{% endfor %}</select></label>
+        </div>
+        <button class="button compact full-button" type="submit">Add recurring expense</button>
+      </form>
+    </article>
+  </div>
+</section>
+<script id="analytics-data" type="application/json">{{ analytics|tojson }}</script>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='charts.js') }}" defer></script>{% endblock %}

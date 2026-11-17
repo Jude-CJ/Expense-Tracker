@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Preferences{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div><div class="eyebrow">YOUR ACCOUNT</div><h1>Currency &amp; locale</h1><p class="muted">Choose how amounts and dates appear throughout Pennywise.</p></div>
+  <a class="button ghost" href="{{ url_for('dashboard') }}">← Back to overview</a>
+</header>
+<section class="panel form-panel settings-panel">
+  <form method="post" class="form-stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Currency
+      <select name="currency" required>
+        {% for code, name in currencies.items() %}
+        <option value="{{ code }}" {% if current_user.currency == code %}selected{% endif %}>{{ code }} — {{ name }}</option>
+        {% endfor %}
+      </select>
+      <span class="field-help">Used for expense amounts, budgets, charts, and CSV exports.</span>
+    </label>
+    <label>Number and date format
+      <select name="locale" required>
+        {% for code, name in locales.items() %}
+        <option value="{{ code }}" {% if current_user.locale == code %}selected{% endif %}>{{ name }}</option>
+        {% endfor %}
+      </select>
+      <span class="field-help">Controls how numbers and dates are displayed in the dashboard.</span>
+    </label>
+    <p class="settings-note">Changing your currency changes how existing amounts are labeled; it does not convert them using exchange rates. Choose the currency in which you recorded your expenses.</p>
+    <div class="form-actions"><button class="button primary" type="submit">Save preferences <span>→</span></button></div>
+  </form>
+</section>
+{% endblock %}
